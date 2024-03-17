@@ -1,140 +1,85 @@
 const { MongoClient } = require("mongodb");
-
-// The uri string must be the connection string for the database (obtained on Atlas).
-const uri = "mongodb+srv://<user>:<password>@ckmdb.5oxvqja.mongodb.net/?retryWrites=true&w=majority";
-
-// --- This is the standard stuff to get it to work on the browser
 const express = require('express');
+const cookieParser = require('cookie-parser');
+
 const app = express();
 const port = 3000;
-app.listen(port);
-console.log('Server started at http://localhost:' + port);
 
+// MongoDB connection URI
+const uri = "mongodb+srv://<user>:<password>@ckmdb.5oxvqja.mongodb.net/?retryWrites=true&w=majority";
+
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
-// routes will go here
+// MongoDB client
+const client = new MongoClient(uri);
 
-// Default route.
-// Provides a selection of routes to go to as links.
+// Default route
 app.get('/', function(req, res) {
-  var outstring = 'Default endpoint starting on date: ' + Date.now();
-  outstring += '<p><a href=\"./task1\">Go to Task 1</a>';
-  outstring += '<p><a href=\"./task2\">Go to Task 2</a>';
-  res.send(outstring);
+  res.send('Welcome to the default endpoint.');
 });
 
-app.get('/task1', function(req, res) {
-  var outstring = 'Starting Task 1 on date: ' + Date.now();
-  res.send(outstring);
-});
+// Registration endpoint
+app.post('/register', async function(req, res) {
+  const { username, password } = req.body;
 
-app.get('/task2', function(req, res) {
-  var outstring = 'Starting Task 2 on date: ' + Date.now();
-  res.send(outstring);
-});
-
-app.get('/say/:name', function(req, res) {
-  res.send('Hello ' + req.params.name + '!');
-});
-
-
-// Access Example-1
-// Route to access database using a parameter:
-// access as ...app.github.dev/api/mongo/9876
-app.get('/api/mongo/:item', function(req, res) {
-const client = new MongoClient(uri);
-
-async function run() {
   try {
+    await client.connect();
     const database = client.db('ckmdb');
-    const parts = database.collection('cmps415');
+    const usersCollection = database.collection('users');
 
-    // Here we make a search query where the key is hardwired to 'partID' 
-    // and the value is picked from the input parameter that comes in the route
-     const query = { partID: req.params.item };
-     console.log("Looking for: " + query);
-
-    const part = await parts.findOne(query);
-    console.log(part);
-    res.send('Found this: ' + JSON.stringify(part));  //Use stringify to print a json
-
+    // Insert new user into database
+    await usersCollection.insertOne({ username, password });
+    res.send('User registered successfully.');
+  } catch (error) {
+    console.error('Error registering user:', error);
+    res.status(500).send('An error occurred while registering user.');
   } finally {
-    // Ensures that the client will close when you finish/error
     await client.close();
   }
-}
-run().catch(console.dir);
 });
 
+// Login endpoint
+app.post('/login', async function(req, res) {
+  const { username, password } = req.body;
 
-// Access Example-2
-// Route to access database using two parameters:
-app.get('/api/mongo2/:inpkey&:item', function(req, res) {
-// access as ...app.github.dev/api/mongo2/partID&12345
-console.log("inpkey: " + req.params.inpkey + " item: " + req.params.item);
-
-const client = new MongoClient(uri);
-
-async function run() {
   try {
+    await client.connect();
     const database = client.db('ckmdb');
-    const where2look = database.collection('cmps415');
+    const usersCollection = database.collection('users');
 
-    // Here we will make a query object using the parameters provided with the route
-    // as they key:value pairs
-    const query = {};
-    query[req.params.inpkey]= req.params.item;
-
-    console.log("Looking for: " + JSON.stringify(query));
-
-    const part = await where2look.findOne(query);
-    console.log('Found this entry: ', part);
-    res.send('Found this: ' + JSON.stringify(part));  //Use stringify to print a json
-
+    // Check if user exists and credentials match
+    const user = await usersCollection.findOne({ username, password });
+    if (user) {
+      // Set authentication cookie with short expiry time (e.g., 1 minute)
+      res.cookie('authenticated', true, { maxAge: 60000 });
+      res.send('Login successful. Authentication cookie set.');
+    } else {
+      res.status(401).send('Invalid username or password.');
+    }
+  } catch (error) {
+    console.error('Error logging in:', error);
+    res.status(500).send('An error occurred while logging in.');
   } finally {
-    // Ensures that the client will close when you finish/error
     await client.close();
   }
-}
-run().catch(console.dir);
 });
 
+// Report all active cookies
+app.get('/report-cookies', function(req, res) {
+  const cookies = req.cookies;
+  res.send('Active cookies: ' + JSON.stringify(cookies));
+});
 
-// Route to write to the database:
-// Access like this:  https://.....app.github.dev/api/mongowrite/partID&54321
-// References:
-// https://www.mongodb.com/docs/drivers/node/current/usage-examples/insertOne
-// https://www.mongodb.com/docs/drivers/node/current/usage-examples/insertMany
+// Clear all cookies
+app.get('/clear-cookies', function(req, res) {
+  res.clearCookie('authenticated');
+  res.send('All cookies cleared.');
+});
 
-app.get('/api/mongowrite/:inpkey&:inpval', function(req, res) {
-console.log("PARAMS: inpkey: " + req.params.inpkey + " inpval: " + req.params.inpval);
-
-const client = new MongoClient(uri);
-
-// The following is the document to insert (made up with input parameters) :
-// First I make a document object using static fields
-const doc2insert = { 
-  name: 'Cris', 
-  Description: 'This is a test', };
-// Additional fields using inputs:
-  doc2insert[req.params.inpkey]=req.params.inpval;
-
-console.log("Adding: " + doc2insert);
-
-async function run() {
-  try {
-    const database = client.db('ckmdb');
-    const where2put = database.collection('cmps415');
-
-    const doit = await where2put.insertOne(doc2insert);
-    console.log(doit);
-    res.send('Got this: ' + JSON.stringify(doit));  //Use stringify to print a json
-
-  } finally {
-    // Ensures that the client will close when you finish/error
-    await client.close();
-  }
-}
-run().catch(console.dir);
+// Start server
+app.listen(port, () => {
+  console.log(`Server started at http://localhost:${port}`);
 });
